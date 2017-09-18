@@ -1,0 +1,213 @@
+<!DOCTYPE>
+<html>
+    <head>
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" type="text/css">
+    </head>
+    <body>
+        <div id="app" class="container">
+            <div class="row">
+                <h1>WELCOME</h1>
+                <p>
+                    <router-link to="/login">Go to Login</router-link>
+                </p>
+                <router-view></router-view>
+            </div>            
+        </div>
+    </body>
+    <script src="https://unpkg.com/vue"></script>
+    <script src="https://unpkg.com/vue-router/dist/vue-router.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue-resource@1.3.4"></script>
+    <script>
+        const NotFound = { template: '<p>Page not found</p>' }
+        const Login = { 
+            template: `
+                    <div class="col-md-4 col-md-offset-4">
+                        <form>
+                            <div class="form-group">
+                                <label for="email">Email address:</label>
+                                <input v-model="email" type="email" class="form-control" id="email">
+                            </div>
+                            <div class="form-group">
+                                <label for="pwd">Password:</label>
+                                <input v-model="password" type="password" class="form-control" id="pwd">
+                            </div>
+                            <div class="checkbox">
+                                <label><input type="checkbox"> Remember me</label>
+                            </div>
+                            <button v-on:click="login(email, password)"  class="btn btn-default">Submit</button>
+                        </form>
+                    </div>
+            `,
+            methods: {
+                login: function(email, password){
+                    localStorage.email = email;
+                    localStorage.password = password;
+                    this.$http.post('/login', { email: email, password: password}).then( response =>{
+                        if(response.status === 206){
+                            return router.push('otp');
+                        } else if(response.status === 200) {
+                            localStorage.clear();
+                            localStorage.loggedin = true;
+                            return router.push('setup');
+                        }
+                    }).catch(err => {
+                        alert("Invalid creds");
+                    });
+                }
+            },
+            data: function(){
+                return {
+                    email: "jon.doe@gmail.com",
+                    password: "test"
+                }
+            }
+         }
+        const Otp = { 
+            template: `
+                <div class="col-md-4 col-md-offset-4">
+                    <form>
+                        <div class="form-group">
+                            <label for="otp">Enter Otp:</label>
+                            <input v-model="otp" type="otp" class="form-control" id="otp">
+                        </div>
+                        <button v-on:click="login(otp)"  class="btn btn-default">Submit</button>
+                    </form>
+                </div>
+            ` ,
+            data: function(){
+                return {
+                    otp: ""
+                }
+            },
+            methods: {
+                login: function(otp){
+                    const options = {
+                        headers: {
+                            ['x-otp']: otp
+                        }
+                    }
+                    const payload = {
+                        email: localStorage.email,
+                        password: localStorage.password 
+                    }
+                    this.$http.post('/login', payload, options).then((response)=>{
+                        if(response.status === 200){
+                            localStorage.clear();
+                            localStorage.loggedin = true;
+                            return router.push('setup');
+                        }
+                        alert('Invalid creds');
+                    }).catch(err => {
+                        alert("Invalid creds");
+                    });
+                }
+            }
+        }
+        const Setup = { 
+            template: `
+                <div>
+                    <div class="col-md-4 col-md-offset-4" v-if="twofactor.secret">
+                        <h3>Current Settings</h3>
+                        <img :src="twofactor.dataURL" alt="..." class="img-thumbnail">
+                        <p>Secret - {{twofactor.secret || twofactor.tempSecret}}</p>
+                        <p>Type - TOTP</p>
+                    </div>
+                    <div class="col-md-4 col-md-offset-4" v-if="!twofactor.secret">
+                        <h3>Setup Otp</h3>
+                        <div>
+                            <button v-on:click="setup()"  class="btn btn-default">Enable</button>
+                        </div>
+                        <span v-if="!!twofactor.tempSecret">
+                            <p>Scan the QR code or enter the secret in Google Authenticator</p>
+                            <img :src="twofactor.dataURL" alt="..." class="img-thumbnail">
+                            <p>Secret - {{twofactor.tempSecret}}</p>
+                            <p>Type - TOTP</p>
+                            <form>
+                                <div class="form-group">
+                                    <label for="otp">Enter Otp:</label>
+                                    <input v-model="otp" type="otp" class="form-control" id="otp">
+                                </div>
+                                <button v-on:click="confirm(otp)"  class="btn btn-default">confirm</button>
+                            </form>
+                        </span>
+                    </div>
+                    <div class="col-md-1">
+                        <h3>Disable</h3>
+                        <form>
+                            <button v-on:click="disable()"  class="btn btn-danger">Disable</button>
+                        </form>
+                    </div>
+                </div>
+            `,
+            methods: {
+                /** setup two factor authentication*/
+                setup: function(){
+                    this.$http.post('/twofactor/setup', {}).then(response => {
+                        const result =  response.body;
+                        if(response.status === 200){
+                            console.log(result);
+                            alert(result.message);
+                            this.twofactor = result;
+                        }
+                    });
+                },
+                /** Verify the otp once to enable 2fa*/
+                confirm: function(otp){
+                    const body = {
+                        token: otp
+                    }
+                    this.$http.post('/twofactor/verify', body).then(response => {
+                        const result =  response.body;
+                        if(response.status === 200){
+                            this.twofactor.secret = this.twofactor.tempSecret;
+                            this.twofactor.tempSecret = "";
+                        }
+                    }).catch(err=>alert('invalid otp'));
+                },
+                /** disable 2fa */
+                disable: function(){
+                    this.$http.delete('/twofactor/setup').then(response => {
+                        const result =  response.body;
+                        if(response.status === 200){
+                            router.push('login');
+                        }
+                    }).catch(err => alert('error occured'));
+                }
+            },
+            data: function(){
+                return {
+                    twofactor: {
+                        secret: "",
+                        tempSecret: ""
+                    },
+                    otp: ""
+                }
+            },
+            /** when component is created check if 2fa is enabled*/
+            created: function(){
+                this.$http.get('/twofactor/setup').then(response => {
+                    const result =  response.body;
+                    if(response.status === 200 && !!result.secret){
+                        this.twofactor = result
+                    }
+                }).catch((err)=>{
+                    if(err.status === 401){
+                        router.push('login');
+                    }
+                });
+            }
+        }
+        
+        const routes = [
+            { path: '/login', component: Login },
+            { path: '/otp', component: Otp },
+            { path: '/setup', component: Setup }
+        ];
+        const router = new VueRouter({
+            routes // short for `routes: routes`
+        });
+        const app = new Vue({
+            router
+        }).$mount('#app');
+    </script>
+</html>
